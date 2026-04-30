@@ -59,11 +59,11 @@ Blim <- 34788
 Btrigger <- 48340
 refpts <- FLPar(c(Blim = Blim, Btrigger = Btrigger))
 # TODO: no. of cores to use in parallel, defauls to 2/3 of those in machine
-cores <- floor(availableCores() * 0.5)
+cores <- 2#floor(availableCores() * 0.5)
 # TODO: F search grid
 fg_mp <- seq(0, 3, length=9)
 # Number of iterations (minimum of 25 for testing, 500 for final)
-it <- 1
+it <- 2
 # Random seed
 set.seed(987)
 
@@ -114,6 +114,7 @@ om <- fwdWindow(om, end=fy, nsq=conditioning_ny)
 
 #====================================================================
 # OEM
+# Needs to create objects with the same dimensions as the OM
 #====================================================================
 #--------------------------------------------------------------------
 # deviances for indices using q estimated by the model
@@ -135,8 +136,8 @@ names(idcs) <- names(idx)
 #--------------------------------------------------------------------
 
 # create object from OM structure
-catch.dev <- catch.n(stock(om))[,ac(iy:fy)]
-# get observation error variance from fit
+catch.dev <- catch.n(stock(om))
+# get observation error variance from fit assuming fixed over time
 catch.dev[] <- yearMeans(sqrt(predict(fit)$vmodel$catch))
 # randomize
 catch.dev <- rnorm(it, 0, sd=catch.dev)
@@ -156,7 +157,7 @@ dev <- list(idx=idxDev, stk=stkDev)
 obs <- list(idx=idcs, stk=stk)
 
 # OEM
-oem <- FLoem(method=sampling.oem, observations=obs, deviances=dev)
+oem <- FLoem(method=mse::sampling.oem, observations=obs, deviances=dev)
 
 #====================================================================
 # MP
@@ -184,7 +185,7 @@ arule <- mpCtrl(
 # Run simulations
 #====================================================================
 
-tes0 <- mp(om, ctrl=arule, args=mseargs)
+tes0 <- mp(om, oem, ctrl=arule, args=mseargs)
 
 # RUN over Ftarget grid
 fgrid <- mps(om, ctrl=arule, args=mseargs, hcr=list(target=fg_mp),
