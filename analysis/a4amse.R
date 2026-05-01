@@ -1,13 +1,12 @@
 #====================================================================
 # 20260429EJ
+# MSE template for a full feedback model with a4a sca
 #====================================================================
 
 # load libraries and functions
 library(FLa4a)
-library(FLasher)
 library(FLBRP)
 library(ggplotFL)
-library(TAF)
 library(mse)
 library(msemodules)
 source("utilities.R")
@@ -26,14 +25,12 @@ idx <- FLIndices(idx=hke.idx)
 
 # Name of the stock
 stkname <- name(stk)
-# TODO: Recruitment models to be used in the OM conditioning
-srmodels <- c("bevholt") # segreg, bevholt, ricker
+# Recruitment model to be used in the OM conditioning
+srmodel <- "segreg" # segreg, bevholt, ricker
 # Initial year of projections
 iy <- dims(stk)$maxyear
 # First year of data
 y0 <- dims(stk)$minyear
-# Years to be used to compute SPR0 for stock-recruitment model
-spryrs <- seq(dims(stk)$minyear, iy)
 # Data lag
 dl <- 1
 # Management lag
@@ -42,39 +39,20 @@ ml <- 1
 af <- 1
 # Data year
 dy <- iy - dl
+# NUmber of years to projections
+npy <- 10
 # Final year
-fy <- iy + 10
+fy <- iy + npy
 # Years to compute probability metrics
-pys <- seq(fy - 5, fy)
+pys <- seq(fy - 5, fy-1)
 # How many years from the past to condition the future
 conditioning_ny <- 5
-# CV for SSB to add uncertainty in the shortcut estimator
-bcv_sa <- 0.5
-# CV for F to add uncertainty in the shortcut estimator
-fcv_sa <- 0.5
 # Years for geometric mean in short term forecast
 recyrs_mp <- -2
-# TODO: Blim and Btrigger
-Blim <- 34788
-Btrigger <- 48340
-refpts <- FLPar(c(Blim = Blim, Btrigger = Btrigger))
-# TODO: no. of cores to use in parallel, defauls to 2/3 of those in machine
-cores <- 2#floor(availableCores() * 0.5)
-# TODO: F search grid
-fg_mp <- seq(0, 3, length=9)
 # Number of iterations (minimum of 25 for testing, 500 for final)
-it <- 2
+it <- 1
 # Random seed
 set.seed(987)
-
-# PARALLEL setup via doFuture
-if(os.linux()) {
-  plan(multicore, workers=cores)
-} else {
-  plan(multisession, workers=cores)
-}
-
-options(doFuture.rng.onMisuse="ignore")
 
 #====================================================================
 # OM conditioning
@@ -98,16 +76,17 @@ fit <- simulate(fit, it)
 om <- hke.stk + fit
 
 # Stock-recruitment relationship(s)
-om.sr <- fmle(as.FLSR(om, model="bevholt"), control = list(trace = 0))
+om.sr <- fmle(as.FLSR(qapply(om, iterMedians), model=srmodel), control = list(trace = 0))
 om.srdevs <- rlnormar1(it, sdlog=sd(residuals(om.sr)), years=seq(dy, fy))
 
 # BRP
 om.brp <- brp(FLBRP(om, sr=om.sr))
+rp <- remap(refpts(om.brp))
 
 #--------------------------------------------------------------------
 # BUILD FLom, OM FLR object
 #--------------------------------------------------------------------
-om <- FLom(stock=om, refpts=refpts(om.brp), model="bevholt",
+om <- FLom(stock=om, refpts=rp, model=srmodel,
   params=params(om.sr), deviances=om.srdevs, name=stkname)
 
 # SETUP om future: average of most recent years set by conditioning_ny
@@ -118,47 +97,58 @@ om <- fwdWindow(om, end=fy, nsq=conditioning_ny)
 # Needs to create objects with the same dimensions as the OM
 #====================================================================
 #--------------------------------------------------------------------
-# deviances for indices using q estimated by the model
+# deviances for indices using q vmodel(s)
 #--------------------------------------------------------------------
 idcs <- FLIndices()
+idxDev <- FLQuants()
+
 for (i in 1:length(idx)){
-	i.q0 <- predict(fit)$qmodel[[i]]
-	i.q <- window(i.q0, end=fy)
-	i.q[,ac((iy):fy)] <- i.q[,ac(dy)]
-	i.fit <- window(index(fit)[[i]], end=fy)
-	idx_temp <- FLIndex(index=i.fit, index.q=i.q)
-	range(idx_temp)[c("startf", "endf")] <- range(idx[[i]])[c("startf", "endf")]
-	idcs[[i]] <- idx_temp
+  # catchability predicted by the model
+  i.q0 <- predict(fit)$qmodel[[i]]
+  # use median, no estimation error
+  i.q0[] <- iterMedians(i.q0)
+  i.q <- window(i.q0, end=fy)
+  i.q[,ac((iy):fy)] <- i.q[,ac(dy)]
+  i.fit <- window(index(fit)[[i]], end=fy)
+  idx_temp <- FLIndex(index=i.fit, index.q=i.q)
+  range(idx_temp)[c("startf", "endf")] <- range(idx[[i]])[c("startf", "endf")]
+  idcs[[i]] <- idx_temp
+  idxDev[[i]] <- index(idx_temp)
+  idxDev[[i]][] <- yearMeans(sqrt(predict(fit)$vmodel[[i+1]]))
+  # randomize
+  idxDev[[i]] <- rnorm(it, 0, sd=idxDev[[i]])
 }
-names(idcs) <- names(idx)
+names(idcs) <- names(idxDev) <- names(idx)
 
 #--------------------------------------------------------------------
-# deviances for catches
+# deviances for catches using catch vmodel
 #--------------------------------------------------------------------
-
 # create object from OM structure
 catch.dev <- catch.n(stock(om))
 # get observation error variance from fit assuming fixed over time
 catch.dev[] <- yearMeans(sqrt(predict(fit)$vmodel$catch))
 # randomize
 catch.dev <- rnorm(it, 0, sd=catch.dev)
+stkDev <- FLQuants(catch.n=catch.dev)
 
 #--------------------------------------------------------------------
 # build OEM object
 #--------------------------------------------------------------------
-
-idxDev <- lapply(idcs, index.q)
-names(idxDev) <- c("index.q")
-stkDev <- FLQuants(catch.n=catch.dev)
-
 # deviances
 dev <- list(idx=idxDev, stk=stkDev)
 # observations
-# WARNING: note we're selecting one index only
 obs <- list(idx=idcs, stk=stock(om))
+# FLoem object
+oem <- FLoem(method=sca.oem, observations=obs, deviances=dev)
 
-# OEM
-oem <- FLoem(method=mse::sampling.oem, observations=obs, deviances=dev)
+#====================================================================
+# IEM
+# not much to say, just assuming our own ignorance ...
+#====================================================================
+noise <- catch(stock(om))
+noise[] <- 0.1
+noise <- rlnorm(it, 0, sd=noise)
+iem <- FLiem(method=noise.iem, args=list(noise=noise))
 
 #====================================================================
 # MP
@@ -170,27 +160,36 @@ mseargs <- list(iy=iy, fy=fy, data_lag=dl, management_lag=ml, frq=af)
 # SETUP standard ICES advice rule
 arule <- mpCtrl(
 
-# (est)imation method: shortcut.sa + SSB deviances
+  # estimation method: full feedback (a4a) sca
   est = mseCtrl(method=sca.sa, args=list(fmodel=fmod, qmodel=qmod, update=FALSE)),
 
+  # parametrizing the HCR
+  phcr = mseCtrl(method=f.phcr, args=list(interval=3)),
+
   # hcr: hockeystick (fbar ~ ssb | lim, trigger, target, min)
-  hcr = mseCtrl(method=hockeystick.hcr,
-    args=list(lim=0, trigger=0, target=0.5, min=0,
-    metric="ssb", output="fbar")),
+#   hcr = mseCtrl(method=hockeystick.hcr,
+#         #args=list(lim=0.25*refpts(om.brp)["fmax","ssb"], trigger=0.5*refpts(om.brp)["fmax","ssb"],
+#         args=list(lim=0, trigger=0, target=1, min=0, metric="ssb", output="fbar")),
+
+  # hcr: fixed F
+  hcr = mseCtrl(method=f.hcr),
 
   # (i)mplementation (sys)tem: tac.is (C ~ F)
-  isys = mseCtrl(method=tac.is, args=list(recyrs=recyrs_mp))
+  #isys = mseCtrl(method=tac_sca.is, args=list(recyrs=recyrs_mp))
+  isys = mseCtrl(method=effort.is, args=list(nyrs=3))
 )
 
 #====================================================================
 # Run simulations
 #====================================================================
 
-tes0 <- mp(om, oem, ctrl=arule, args=mseargs)
+tes0 <- mp(om, oem, iem, ctrl=arule, args=mseargs)
 
-# RUN over Ftarget grid
-fgrid <- mps(om, ctrl=arule, args=mseargs, hcr=list(target=fg_mp),
-  names=paste0("F", fg_mp))
-
-# PLOT
-plot(om, fgrid)
+# # RUN over Ftarget grid
+# TODO: F search grid
+# fg_mp <- seq(0, 3, length=9)
+# fgrid <- mps(om, ctrl=arule, args=mseargs, hcr=list(target=fg_mp),
+#   names=paste0("F", fg_mp))
+#
+# # PLOT
+# plot(om, fgrid)
