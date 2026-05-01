@@ -3,7 +3,9 @@
 # MSE template for a full feedback model with a4a sca
 #====================================================================
 
+#--------------------------------------------------------------------
 # load libraries and functions
+#--------------------------------------------------------------------
 library(FLa4a)
 library(FLBRP)
 library(ggplotFL)
@@ -11,7 +13,9 @@ library(mse)
 library(msemodules)
 source("utilities.R")
 
+#--------------------------------------------------------------------
 # load data
+#--------------------------------------------------------------------
 # stock
 load("../data/HKE_1_5_6_7_STK.Rdata")
 stk <- hke.stk
@@ -23,36 +27,48 @@ idx <- FLIndices(idx=hke.idx)
 # SETUP
 #====================================================================
 
+#--------------------------------------------------------------------
+# decisions
+#--------------------------------------------------------------------
 # Name of the stock
 stkname <- name(stk)
 # Recruitment model to be used in the OM conditioning
 srmodel <- "segreg" # segreg, bevholt, ricker
-# Initial year of projections
-iy <- dims(stk)$maxyear
-# First year of data
-y0 <- dims(stk)$minyear
 # Data lag
 dl <- 1
 # Management lag
-ml <- 1 
+ml <- 1
 # Assessment frequency
 af <- 1
-# Data year
-dy <- iy - dl
-# NUmber of years to projections
+# Interval between updates of reference points
+rpyi <- 1
+# Number of years to projections
 npy <- 10
-# Final year
-fy <- iy + npy
-# Years to compute probability metrics
-pys <- seq(fy - 5, fy-1)
 # How many years from the past to condition the future
 conditioning_ny <- 5
 # Years for geometric mean in short term forecast
 recyrs_mp <- -2
+# Years to compute probability metrics
+# (taken from the last years in the projection,
+# need to workout something different if aimed at short term performance)
+pys <- 5
 # Number of iterations (minimum of 25 for testing, 500 for final)
-it <- 1
+it <- 100
 # Random seed
 set.seed(987)
+
+#--------------------------------------------------------------------
+# setup
+#--------------------------------------------------------------------
+# Initial year of projections
+iy <- dims(stk)$maxyear
+# First year of data
+y0 <- dims(stk)$minyear
+# Data year
+dy <- iy - dl
+# Final year
+fy <- iy + npy
+pys <- seq(fy - pys, fy-1)
 
 #====================================================================
 # OM conditioning
@@ -61,7 +77,6 @@ set.seed(987)
 #--------------------------------------------------------------------
 # assessment
 #--------------------------------------------------------------------
-
 # survey catchability submodel
 qmod <- list(~ I(1/(1+exp(-age))))
 
@@ -164,18 +179,12 @@ arule <- mpCtrl(
   est = mseCtrl(method=sca.sa, args=list(fmodel=fmod, qmodel=qmod, update=FALSE)),
 
   # parametrizing the HCR
-  phcr = mseCtrl(method=f.phcr, args=list(interval=3)),
-
-  # hcr: hockeystick (fbar ~ ssb | lim, trigger, target, min)
-#   hcr = mseCtrl(method=hockeystick.hcr,
-#         #args=list(lim=0.25*refpts(om.brp)["fmax","ssb"], trigger=0.5*refpts(om.brp)["fmax","ssb"],
-#         args=list(lim=0, trigger=0, target=1, min=0, metric="ssb", output="fbar")),
+  phcr = mseCtrl(method=f.phcr, args=list(interval=rpyi)),
 
   # hcr: fixed F
   hcr = mseCtrl(method=f.hcr),
 
   # (i)mplementation (sys)tem: tac.is (C ~ F)
-  #isys = mseCtrl(method=tac_sca.is, args=list(recyrs=recyrs_mp))
   isys = mseCtrl(method=effort.is, args=list(nyrs=3))
 )
 
