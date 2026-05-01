@@ -64,11 +64,45 @@ f.phcr <- function(stk, frp="f0.1", model="missing", interval, args, tracking) {
 			hcrpars <- refpts(brp(FLBRP(stk)))[tolower(frp),"harvest"]
 		}
 	} else {
-		hcrpars <- FLPar(tracking[metric=="phcr" & year==ay-1, "data"])
+		hcrpars <- FLPar(tracking[metric=="phcr" & year==ay-data_lag, "data"])
 	}
-	tracking[metric=="phcr" & year==ay, "data"] <- c(hcrpars)
+	#track(tracking, "metric", ay) <- ###
 	list(hcrpars=hcrpars, tracking=tracking)
-} # }}}
+}
+
+westmedmap.phcr <- function(stk, fmsy_proxy="msy", bpa_proxy="spr.30", model="missing", fmin=0, interval=1, args, tracking) {
+
+    # args
+    spread(args)
+
+    # RUN brp() with or without SR fit
+	if(ay == iy | (ay - iy) %% interval == 0){
+		if(!missing(model)){
+			sr0 <- fmle(as.FLSR(stk, model=model))
+			hcrpars <- refpts(brp(FLBRP(stk, sr0)))
+        } else {
+			hcrpars <- refpts(brp(FLBRP(stk)))
+		}
+		hcrpars <- FLPar(
+            fmsy=c(hcrpars[fmsy_proxy, "harvest", ]),
+            bpa=c(hcrpars[bpa_proxy, "ssb", ]),
+            blim=c(hcrpars[bpa_proxy, "ssb", ])*0.5,
+            flow=c(hcrpars[fmsy_proxy, "harvest", ])*0.9,
+            fupp=c(hcrpars[fmsy_proxy, "harvest", ])*1.1,
+            fmin=fmin)
+    } else {
+        hcrpars <- FLPar(tracking[metric==c("fmsy", "bpa", "blim", "flow", "fupp", "fmin") & year==ay-data_lag, "data"])
+	}
+
+	track(tracking, "fmsy", ay) <- c(hcrpars["fmsy"])
+	track(tracking, "bpa", ay) <- c(hcrpars["bpa"])
+	track(tracking, "blim", ay) <- c(hcrpars["blim"])
+	track(tracking, "flow", ay) <- c(hcrpars["flow"])
+	track(tracking, "fupp", ay) <- c(hcrpars["fupp"])
+	track(tracking, "fmin", ay) <- c(hcrpars["fmin"])
+
+	list(hcrpars=hcrpars, tracking=tracking)
+}
 
 #--------------------------------------------------------------------
 # hcr: basic F HCR
@@ -82,8 +116,30 @@ f.hcr <- function(stk, hcrpars, args, tracking){
   # create control file
     ctrl <- fwdControl(year=seq(ay + management_lag, ay + frq), quant="fbar", value=c(hcrpars))
 
-    tracking[metric=="hcr" & year==ay, "data"] <- c(hcrpars)
-  # return
+	list(ctrl=ctrl, tracking=tracking)
+}
+
+#--------------------------------------------------------------------
+# hcr: west med map HCR
+#--------------------------------------------------------------------
+westmedmap.hcr <- function(stk, hcrpars, args, tracking){
+    spread(args)
+	ssb_lag <- ifelse(is.null(args$ssb_lag), 1, args$ssb_lag)
+	fout <- ssb0 <- ssb(stk)[, ac(ay-ssb_lag)]
+    ftrg <- c(hcrpars["fmsy"])
+    fmin <- c(hcrpars["fmin"])
+    bpa <- c(hcrpars["bpa"])
+	blim <- c(hcrpars["blim"])
+
+	# rule
+	fout[] <- fmin
+	fout[ssb0 >= bpa] <- ftrg
+	inbetween <- (ssb0 < bpa) & (ssb0 > blim)
+	gradient <- (ftrg - fmin) / (bpa - blim)
+	fout[inbetween] <- ((ssb0 - blim) * gradient + fmin)[inbetween]
+	# create control file
+    ctrl <- fwdControl(year=seq(ay + management_lag, ay + frq), quant="fbar", value=c(fout))
+	# return
 	list(ctrl=ctrl, tracking=tracking)
 }
 
