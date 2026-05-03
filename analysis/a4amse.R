@@ -33,7 +33,7 @@ idx <- FLIndices(idx=hke.idx)
 # Name of the stock
 stkname <- name(stk)
 # Recruitment model to be used in the OM conditioning
-srmodel <- "segreg" # segreg, bevholt, ricker
+srmodel <- "geomean" # segreg, bevholt, ricker
 # Data lag
 dl <- 1
 # Management lag
@@ -41,7 +41,7 @@ ml <- 1
 # Assessment frequency
 af <- 1
 # Interval between updates of reference points
-rpyi <- 1
+rpyi <- 5
 # Number of years to projections
 npy <- 10
 # How many years from the past to condition the future
@@ -53,7 +53,7 @@ recyrs_mp <- -2
 # need to workout something different if aimed at short term performance)
 pys <- 5
 # Number of iterations (minimum of 25 for testing, 500 for final)
-it <- 100
+it <- 10
 # Random seed
 set.seed(987)
 
@@ -179,10 +179,10 @@ arule <- mpCtrl(
   est = mseCtrl(method=sca.sa, args=list(fmodel=fmod, qmodel=qmod, update=FALSE)),
 
   # parametrizing the HCR
-  phcr = mseCtrl(method=f.phcr, args=list(interval=rpyi)),
+  phcr = mseCtrl(method=westmedmap.phcr, args=list(interval=rpyi, frp="msy", model="geomean")),
 
   # hcr: fixed F
-  hcr = mseCtrl(method=f.hcr),
+  hcr = mseCtrl(method=westmedmap.hcr),
 
   # (i)mplementation (sys)tem: tac.is (C ~ F)
   isys = mseCtrl(method=effort.is, args=list(nyrs=3))

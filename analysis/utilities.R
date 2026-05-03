@@ -58,7 +58,7 @@ f.phcr <- function(stk, frp="f0.1", model="missing", interval, args, tracking) {
   # RUN brp() with or without SR fit
 	if(ay == iy | (ay - iy) %% interval == 0){
 		if(!missing(model)){
-			sr0 <- fmle(as.FLSR(stk, model=model))
+			sr0 <- fmle(as.FLSR(stk, model=model), control = list(trace = 0))
 			hcrpars <- refpts(brp(FLBRP(stk, sr0)))[tolower(frp),"harvest"]
 		} else {
 			hcrpars <- refpts(brp(FLBRP(stk)))[tolower(frp),"harvest"]
@@ -78,7 +78,7 @@ westmedmap.phcr <- function(stk, fmsy_proxy="msy", bpa_proxy="spr.30", model="mi
     # RUN brp() with or without SR fit
 	if(ay == iy | (ay - iy) %% interval == 0){
 		if(!missing(model)){
-			sr0 <- fmle(as.FLSR(stk, model=model))
+			sr0 <- fmle(as.FLSR(stk, model=model), control = list(trace = 0))
 			hcrpars <- refpts(brp(FLBRP(stk, sr0)))
         } else {
 			hcrpars <- refpts(brp(FLBRP(stk)))
@@ -91,7 +91,13 @@ westmedmap.phcr <- function(stk, fmsy_proxy="msy", bpa_proxy="spr.30", model="mi
             fupp=c(hcrpars[fmsy_proxy, "harvest", ])*1.1,
             fmin=fmin)
     } else {
-        hcrpars <- FLPar(tracking[metric==c("fmsy", "bpa", "blim", "flow", "fupp", "fmin") & year==ay-data_lag, "data"])
+        hcrpars <- FLPar(
+			fmsy=unlist(tracking[metric=="fmsy" & year==ay-data_lag, "data"]),
+            bpa=unlist(tracking[metric=="bpa" & year==ay-data_lag, "data"]),
+            blim=unlist(tracking[metric=="blim" & year==ay-data_lag, "data"]),
+            flow=unlist(tracking[metric=="flow" & year==ay-data_lag, "data"]),
+            fupp=unlist(tracking[metric=="fupp" & year==ay-data_lag, "data"]),
+            fmin=unlist(tracking[metric=="fmin" & year==ay-data_lag, "data"]))
 	}
 
 	track(tracking, "fmsy", ay) <- c(hcrpars["fmsy"])
